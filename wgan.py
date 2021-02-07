@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import os
 import time
 import torch
 import torch.nn as nn
@@ -11,14 +12,22 @@ from network import Critic, Generator
 from timeit import default_timer as timer
 from torch.utils.tensorboard import SummaryWriter
 
+EXPERIMENT_ID = int(time.time()) # used to create new directories to save results of individual experiments
+# directories to save resulst of experiments
+DEFAULT_IMG_DIR = 'images/{}'.format(EXPERIMENT_ID)
+DEFAULT_TENSORBOARD_DIR = 'tensorboard/{}'.format(EXPERIMENT_ID)
+
+# this will vary in the ProGAN
+IMG_SIZE = 128
+
 PARSER = argparse.ArgumentParser()
 
 PARSER.add_argument('--data_dir', default='training-data')
 PARSER.add_argument('--load_critic_model_path')
 PARSER.add_argument('--load_generator_model_path')
-PARSER.add_argument('--save_image_dir', default='images')
+PARSER.add_argument('--save_image_dir', default=DEFAULT_IMG_DIR)
 PARSER.add_argument('--save_model_dir', default='models')
-PARSER.add_argument('--tensorboard_dir', default='tensorboard/choccygan')
+PARSER.add_argument('--tensorboard_dir', default=DEFAULT_TENSORBOARD_DIR)
 
 PARSER.add_argument('--epoch_length', default=100, type=int)
 PARSER.add_argument('--learning_rate', default=0.0001, type=float)
@@ -28,6 +37,10 @@ PARSER.add_argument('--num_epochs', default=500, type=int)
 PARSER.add_argument('--weight_clip', default=0.01, type=float)
 
 args = PARSER.parse_args()
+
+# create directories for images and tensorboard results
+os.mkdir('/home/ioanalazar459/wgan/{}'.format(args.save_image_dir))
+os.mkdir('/home/ioanalazar459/wgan/{}'.format(args.tensorboard_dir))
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -119,7 +132,7 @@ for epoch in range(args.num_epochs):
     with torch.no_grad():
         generated_images = generator_model(fixed_latent_space_vectors).detach()
     grid_images = torchvision.utils.make_grid(generated_images, padding=2, normalize=True)
-    torchvision.utils.save_image(grid_images, '{}/{}.jpg'.format(args.save_image_dir, epoch))
+    torchvision.utils.save_image(generated_images, '{}/{}-{}x{}.jpg'.format(args.save_image_dir, epoch, IMG_SIZE, IMG_SIZE), padding=2, normalize=True)
 
     writer.add_image('training/generated-images', grid_images, epoch)
     writer.add_scalar('training/generator/loss', average_generator_loss, epoch)
