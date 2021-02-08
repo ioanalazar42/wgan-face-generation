@@ -16,6 +16,7 @@ EXPERIMENT_ID = int(time.time()) # used to create new directories to save result
 # directories to save resulst of experiments
 DEFAULT_IMG_DIR = 'images/{}'.format(EXPERIMENT_ID)
 DEFAULT_TENSORBOARD_DIR = 'tensorboard/{}'.format(EXPERIMENT_ID)
+DEFAULT_MODEL_DIR = 'models/{}'.format(EXPERIMENT_ID)
 
 # this will vary in the ProGAN
 IMG_SIZE = 128
@@ -26,7 +27,7 @@ PARSER.add_argument('--data_dir', default='/home/datasets/celeba-aligned')
 PARSER.add_argument('--load_critic_model_path')
 PARSER.add_argument('--load_generator_model_path')
 PARSER.add_argument('--save_image_dir', default=DEFAULT_IMG_DIR)
-PARSER.add_argument('--save_model_dir', default='models')
+PARSER.add_argument('--save_model_dir', default=DEFAULT_MODEL_DIR)
 PARSER.add_argument('--tensorboard_dir', default=DEFAULT_TENSORBOARD_DIR)
 
 PARSER.add_argument('--epoch_length', default=100, type=int)
@@ -38,9 +39,10 @@ PARSER.add_argument('--weight_clip', default=0.01, type=float)
 
 args = PARSER.parse_args()
 
-# create directories for images and tensorboard results
+# create directories for images, tensorboard results and saved models
 os.makedirs(args.save_image_dir)
 os.makedirs(args.tensorboard_dir)
+os.makedirs(args.save_model_dir)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -143,11 +145,11 @@ for epoch in range(args.num_epochs):
 
 print('Finished training!')
 
-save_critic_model_path = '{}/critic_{}.pth'.format(args.save_model_dir, time.time())
+save_critic_model_path = '{}/critic_{}.pth'.format(args.save_model_dir, EXPERIMENT_ID)
 print('Saving critic model as "{}"...'.format(save_critic_model_path))
 torch.save(critic_model.state_dict(), save_critic_model_path)
 
-save_generator_model_path = '{}/generator_{}.pth'.format(args.save_model_dir, time.time())
+save_generator_model_path = '{}/generator_{}.pth'.format(args.save_model_dir, EXPERIMENT_ID)
 print('Saving generator model as "{}"...'.format(save_generator_model_path,))
 torch.save(generator_model.state_dict(), save_generator_model_path)
 
