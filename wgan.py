@@ -22,7 +22,7 @@ IMG_SIZE = 128
 
 PARSER = argparse.ArgumentParser()
 
-PARSER.add_argument('--data_dir', default='training-data')
+PARSER.add_argument('--data_dir', default='/home/datasets/celeba-aligned')
 PARSER.add_argument('--load_critic_model_path')
 PARSER.add_argument('--load_generator_model_path')
 PARSER.add_argument('--save_image_dir', default=DEFAULT_IMG_DIR)
@@ -39,8 +39,8 @@ PARSER.add_argument('--weight_clip', default=0.01, type=float)
 args = PARSER.parse_args()
 
 # create directories for images and tensorboard results
-os.mkdir('/home/ioanalazar459/wgan/{}'.format(args.save_image_dir))
-os.mkdir('/home/ioanalazar459/wgan/{}'.format(args.tensorboard_dir))
+os.makedirs(args.save_image_dir)
+os.makedirs(args.tensorboard_dir)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
