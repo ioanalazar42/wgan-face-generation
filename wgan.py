@@ -56,12 +56,12 @@ if args.load_critic_model_path:
 if args.load_generator_model_path:
     generator_model.load_state_dict(torch.load(args.load_generator_model_path))
 
-# Set up RMSProp optimizers for both models.
-critic_optimizer = optim.RMSprop(critic_model.parameters(), lr=args.learning_rate)
-generator_optimizer = optim.RMSprop(generator_model.parameters(), lr=args.learning_rate)
+# Set up Adam optimizers for both models.
+critic_optimizer = optim.Adam(critic_model.parameters(), lr=args.learning_rate, betas=(0, 0.9))
+generator_optimizer = optim.Adam(generator_model.parameters(), lr=args.learning_rate, betas=(0, 0.9))
 
 # Create a random batch of latent space vectors that will be used to visualize the progression of the generator.
-fixed_latent_space_vectors = torch.randn(64, 512, 1, 1, device=device)  # Note: randn is sampling from a normal distribution
+fixed_latent_space_vectors = torch.randn(64, 512, device=device)  # Note: randn is sampling from a normal distribution
 
 # Load and preprocess images:
 images = load_images(args.data_dir)
@@ -93,7 +93,7 @@ for epoch in range(args.num_epochs):
             real_scores = critic_model(real_images)
 
             # Evaluate a mini-batch of generated images.
-            random_latent_space_vectors = torch.randn(args.mini_batch_size, 512, 1, 1, device=device)
+            random_latent_space_vectors = torch.randn(args.mini_batch_size, 512, device=device)
             generated_images = generator_model(random_latent_space_vectors)
 
             generated_scores = critic_model(generated_images.detach()) # TODO: Why exactly is `.detach` required?
