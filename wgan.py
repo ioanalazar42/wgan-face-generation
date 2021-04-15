@@ -1,6 +1,7 @@
 import argparse
 import numpy as np
 import os
+import shutil
 import time
 import torch
 import torch.nn as nn
@@ -12,44 +13,57 @@ from network import Critic, Generator
 from timeit import default_timer as timer
 from torch.utils.tensorboard import SummaryWriter
 
-EXPERIMENT_ID = int(time.time()) # used to create new directories to save results of individual experiments
-# directories to save resulst of experiments
-DEFAULT_IMG_DIR = 'images/{}'.format(EXPERIMENT_ID)
-DEFAULT_TENSORBOARD_DIR = 'tensorboard/{}'.format(EXPERIMENT_ID)
-DEFAULT_MODEL_DIR = 'models/{}'.format(EXPERIMENT_ID)
 
-# this will vary in the ProGAN
+# Define constants.
+EXPERIMENT_ID = int(time.time()) # Used to create new directories to save results of individual experiments.
 IMG_SIZE = 128
+
+EXPERIMENT_DIR = f'experiments/{EXPERIMENT_ID}'
+SAVE_IMAGE_DIR = f'{EXPERIMENT_DIR}/images'
+TENSORBOARD_DIR = f'{EXPERIMENT_DIR}/tensorboard'
+LIVE_TENSORBOARD_DIR = f'{TENSORBOARD_DIR}/live' # Stores the latest version of tensorboard data.
+SAVE_MODEL_DIR = f'{EXPERIMENT_DIR}/models'
 
 PARSER = argparse.ArgumentParser()
 
-PARSER.add_argument('--data_dir', default='/home/datasets/celeba-aligned')
+PARSER.add_argument('--data_dir', default='/home/datasets/celeba-aligned/original')
 PARSER.add_argument('--load_critic_model_path')
 PARSER.add_argument('--load_generator_model_path')
-PARSER.add_argument('--save_image_dir', default=DEFAULT_IMG_DIR)
-PARSER.add_argument('--save_model_dir', default=DEFAULT_MODEL_DIR)
-PARSER.add_argument('--tensorboard_dir', default=DEFAULT_TENSORBOARD_DIR)
-
+PARSER.add_argument('--save_image_dir', default=SAVE_IMAGE_DIR)
+PARSER.add_argument('--save_model_dir', default=SAVE_MODEL_DIR)
+PARSER.add_argument('--tensorboard_dir', default=LIVE_TENSORBOARD_DIR)
+PARSER.add_argument('--dry_run', default=False, type=bool)
+PARSER.add_argument('--model_save_frequency', default=15, type=int)
+PARSER.add_argument('--image_save_frequency', default=100, type=int)
+PARSER.add_argument('--training_set_size', default=99999999, type=int)
 PARSER.add_argument('--epoch_length', default=100, type=int)
+PARSER.add_argument('--gradient_penalty_factor', default=10, type=float)
 PARSER.add_argument('--learning_rate', default=0.0001, type=float)
 PARSER.add_argument('--mini_batch_size', default=256, type=int)
-PARSER.add_argument('--num_critic_training_steps', default=5, type=int)
+PARSER.add_argument('--num_critic_training_steps', default=2, type=int)
 PARSER.add_argument('--num_epochs', default=500, type=int)
 PARSER.add_argument('--weight_clip', default=0.01, type=float)
 
 args = PARSER.parse_args()
 
-# create directories for images, tensorboard results and saved models
-os.makedirs(args.save_image_dir)
-os.makedirs(args.tensorboard_dir)
-os.makedirs(args.save_model_dir)
+# Create directories for images, tensorboard results and saved models.
+if not args.dry_run:
+    if not os.path.exists(EXPERIMENT_DIR):
+        os.makedirs(EXPERIMENT_DIR) # Set up root experiment directory.
+    os.makedirs(args.save_image_dir)
+    os.makedirs(args.tensorboard_dir)
+    os.makedirs(args.save_model_dir)
+    WRITER = SummaryWriter(args.tensorboard_dir) # Set up TensorBoard.
+else:
+    print('Dry run! Just for testing, data is not saved')
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Set up the GAN.
-critic_model = Critic().to(device)
-generator_model = Generator().to(device)
+critic_model = Critic().to(DEVICE)
+generator_model = Generator().to(DEVICE)
 
+# Load pre-trained models if they are provided.
 if args.load_critic_model_path:
     critic_model.load_state_dict(torch.load(args.load_critic_model_path))
 
@@ -61,15 +75,20 @@ critic_optimizer = optim.Adam(critic_model.parameters(), lr=args.learning_rate, 
 generator_optimizer = optim.Adam(generator_model.parameters(), lr=args.learning_rate, betas=(0, 0.9))
 
 # Create a random batch of latent space vectors that will be used to visualize the progression of the generator.
-fixed_latent_space_vectors = torch.randn(64, 512, device=device)  # Note: randn is sampling from a normal distribution
+# Use the same values (seeded at 44442222) between multiple runs, so that the progression can still be seen when loading saved models.
+random_state = np.random.Generator(np.random.PCG64(np.random.SeedSequence(44442222)))
+random_values = random_state.standard_normal([64, 512], dtype=np.float32)
+fixed_latent_space_vectors = torch.tensor(random_values, device=DEVICE)
 
-# Load and preprocess images:
-images = load_images(args.data_dir)
+# Load and preprocess images.
+images = load_images(args.data_dir, args.training_set_size)
 
-# Set up TensorBoard.
-writer = SummaryWriter(args.tensorboard_dir)
-writer.add_graph(critic_model, torch.tensor(images[:1], device=device))
-writer.add_graph(generator_model, fixed_latent_space_vectors)
+# Add network architectures for Critic and Generator to TensorBoard.
+if not args.dry_run:
+    WRITER.add_graph(critic_model, torch.tensor(images[:1], device=DEVICE))
+    WRITER.add_graph(generator_model, fixed_latent_space_vectors)
+
+total_training_steps = 0
 
 for epoch in range(args.num_epochs):
     start_time = timer()
@@ -80,30 +99,32 @@ for epoch in range(args.num_epochs):
     average_critic_loss = 0.0
     average_generator_loss = 0.0
 
-    # Train: perform `args.epoch_length` mini-batch updates per "epoch".
+    # Train: perform 'args.epoch_length' mini-batch updates per "epoch".
     for i in range(args.epoch_length):
+        total_training_steps += 1
+
         # Train the critic:
         for i in range(args.num_critic_training_steps):
             critic_model.zero_grad()
 
             # Evaluate a mini-batch of real images.
             random_indexes = np.random.choice(len(images), args.mini_batch_size)
-            real_images = torch.tensor(images[random_indexes], device=device)
+            real_images = torch.tensor(images[random_indexes], device=DEVICE)
 
             real_scores = critic_model(real_images)
 
             # Evaluate a mini-batch of generated images.
-            random_latent_space_vectors = torch.randn(args.mini_batch_size, 512, device=device)
+            random_latent_space_vectors = torch.randn(args.mini_batch_size, 512, device=DEVICE)
             generated_images = generator_model(random_latent_space_vectors)
 
-            generated_scores = critic_model(generated_images.detach()) # TODO: Why exactly is `.detach` required?
-
+            generated_scores = critic_model(generated_images.detach())
+            
             # Update the weights.
-            loss = torch.mean(generated_scores) - torch.mean(real_scores)  # The critic's goal is for `generated_scores` to be small and `real_scores` to be big. I don't know why we had to overcomplicate things and call this "Wasserstein".
+            loss = torch.mean(generated_scores) - torch.mean(real_scores)  # The critic's goal is for 'generated_scores' to be small and 'real_scores' to be big.
             loss.backward()
             critic_optimizer.step()
 
-            # Limit the size of weights. Otherwise their values can become increasingly bigger due to how the loss function is defined.
+            # Limit the size of weights to prevent their values from becoming increasingly bigger due to how the loss function is defined.
             for parameters in critic_model.parameters():
                 parameters.data.clamp_(-args.weight_clip, args.weight_clip)
 
@@ -111,46 +132,68 @@ for epoch in range(args.num_epochs):
             average_critic_loss += loss.item() / args.num_critic_training_steps / args.epoch_length
             average_critic_real_performance += real_scores.mean().item() / args.num_critic_training_steps / args.epoch_length
             average_critic_generated_performance += generated_scores.mean().item() / args.num_critic_training_steps / args.epoch_length
+            discernability_score = average_critic_real_performance - average_critic_generated_performance # Measure how different generated images are from real images. This should trend towards 0 as fake images become indistinguishable from real ones to the critic.
 
         # Train the generator:
         generator_model.zero_grad()
         generated_scores = critic_model(generated_images)
 
         # Update the weights.
-        loss = -torch.mean(generated_scores)  # The generator's goal is for `generated_scores` to be big.
+        loss = -torch.mean(generated_scores)  # The generator's goal is for 'generated_scores' to be big.
         loss.backward()
         generator_optimizer.step()
 
         # Record some statistics.
         average_generator_loss += loss.item() / args.epoch_length
- 
-    # Record statistics.
+
+        # Save generated images every 'image_save_frequency' training steps. If 'image_save_frequency' == 'epoch_length', images saved every epoch.
+        if (not args.dry_run and total_training_steps % args.image_save_frequency == 0):
+
+            # Save generated images.
+            with torch.no_grad():
+                generated_images = generator_model(fixed_latent_space_vectors).detach()
+            torchvision.utils.save_image(generated_images, f'{args.save_image_dir}/{total_training_steps:05d}-{IMG_SIZE}x{IMG_SIZE}-{epoch}.jpg', padding=2, normalize=True)
+            
+            # Create a grid of generated images to save to Tensorboard.
+            grid_images = torchvision.utils.make_grid(generated_images, padding=2, normalize=True)
+
+    # Record time elapsed for current epoch.
     time_elapsed = timer() - start_time
 
-    print(('Epoch: {} - Critic Loss: {:.6f} - Generator Loss: {:.6f} - Average C(x): {:.6f} - Average C(G(x)): {:.6f} - Time: {:.3f}s')
-        .format(epoch, average_critic_loss , average_generator_loss, average_critic_real_performance, average_critic_generated_performance, time_elapsed))
-        
-    # Save images.
-    with torch.no_grad():
-        generated_images = generator_model(fixed_latent_space_vectors).detach()
-    grid_images = torchvision.utils.make_grid(generated_images, padding=2, normalize=True)
-    torchvision.utils.save_image(generated_images, '{}/{}-{}x{}.jpg'.format(args.save_image_dir, epoch, IMG_SIZE, IMG_SIZE), padding=2, normalize=True)
+    # Print some statistics.
+    print(f'{epoch:3} | '
+          f'Loss(C): {average_critic_loss:.6f} | '
+          f'Loss(G): {average_generator_loss:.6f} | '
+          f'Avg C(x): {average_critic_real_performance:.6f} | '
+          f'Avg C(G(x)): {average_critic_generated_performance:.6f} | '
+          f'C(x) - C(G(x)): {discernability_score:.6f} | '
+          f'Time: {time_elapsed:.3f}s')
+    
+    # Save model parameters, tensorboard data, generated images.
+    if (not args.dry_run):
 
-    writer.add_image('training/generated-images', grid_images, epoch)
-    writer.add_scalar('training/generator/loss', average_generator_loss, epoch)
-    writer.add_scalar('training/critic/loss', average_critic_loss, epoch)
-    writer.add_scalar('training/critic/real-performance', average_critic_real_performance, epoch)
-    writer.add_scalar('training/critic/generated-performance', average_critic_generated_performance, epoch)
-    writer.add_scalar('training/epoch-duration', time_elapsed, epoch)
+        # Save tensorboard data.
+        WRITER.add_image('training/generated-images', grid_images, epoch)
+        WRITER.add_scalar('training/generator/loss', average_generator_loss, epoch)
+        WRITER.add_scalar('training/critic/loss', average_critic_loss, epoch)
+        WRITER.add_scalar('training/critic/real-performance', average_critic_real_performance, epoch)
+        WRITER.add_scalar('training/critic/generated-performance', average_critic_generated_performance, epoch)
+        WRITER.add_scalar('training/discernability-score', discernability_score, epoch)
+        WRITER.add_scalar('training/epoch-duration', time_elapsed, epoch)
+
+        # Save the model parameters at a specified interval.
+        if (epoch > 0 and (epoch % args.model_save_frequency == 0
+            or epoch == args.num_epochs - 1)):
+
+            # Create a backup of tensorboard data each time model is saved.
+            shutil.copytree(LIVE_TENSORBOARD_DIR, f'{TENSORBOARD_DIR}/{epoch:03d}')
+
+            save_critic_model_path = f'{args.save_model_dir}/critic_{EXPERIMENT_ID}-{epoch}.pth'
+            print(f'\nSaving critic model as "{save_critic_model_path}"...')
+            torch.save(critic_model.state_dict(), save_critic_model_path)
+        
+            save_generator_model_path = f'{args.save_model_dir}/generator_{EXPERIMENT_ID}-{epoch}.pth'
+            print(f'Saving generator model as "{save_generator_model_path}"...\n')
+            torch.save(generator_model.state_dict(), save_generator_model_path)
 
 print('Finished training!')
-
-save_critic_model_path = '{}/critic_{}.pth'.format(args.save_model_dir, EXPERIMENT_ID)
-print('Saving critic model as "{}"...'.format(save_critic_model_path))
-torch.save(critic_model.state_dict(), save_critic_model_path)
-
-save_generator_model_path = '{}/generator_{}.pth'.format(args.save_model_dir, EXPERIMENT_ID)
-print('Saving generator model as "{}"...'.format(save_generator_model_path,))
-torch.save(generator_model.state_dict(), save_generator_model_path)
-
-print('Saved models.')
