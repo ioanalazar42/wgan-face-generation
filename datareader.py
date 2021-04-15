@@ -36,8 +36,8 @@ def _load_image(path):
     # Change the 128x128x3 image to 3x128x128 as expected by PyTorch.
     return image.transpose(2, 0, 1)
 
-def load_images(dir_path):
-    file_names = os.listdir(dir_path)
+def load_images(dir_path, training_set_size):
+    file_names = os.listdir(dir_path)[:training_set_size]
     images = np.empty([len(file_names), 3, 128, 128], dtype=np.float32)
     print('Loading {} images from {}...'.format(len(file_names), dir_path))
 
