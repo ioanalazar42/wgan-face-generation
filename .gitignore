@@ -1,4 +1,2 @@
 __pycache__/
-tensorboard/
-images/
-models/
+experiments/
