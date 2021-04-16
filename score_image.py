@@ -23,7 +23,7 @@ PARSER.add_argument('--model_file_name',
                     help='The file name of a trained model')
 PARSER.add_argument('--image_path',
                     default=f'random',
-                    help='The path to an image. "random will pick a random image inside of {IMAGE_DIR_PATH}"')
+                    help='The path to an image. If "random", it will pick a random image inside of {IMAGE_DIR_PATH}"')
 args = PARSER.parse_args()
 
 MODEL_PATH = f'trained_models/{args.model_file_name}'
